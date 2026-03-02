@@ -1,0 +1,66 @@
+name: Petclinic CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - feature/devops-cicd
+
+env:
+  IMAGE_NAME: rjshSynectiks/petclinic
+
+jobs:
+
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Build jar with Maven
+        run: mvn clean package -DskipTests
+
+      - name: Login to DockerHub
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+      - name: Build Docker image
+        run: docker build -t $IMAGE_NAME:${{ github.sha }} .
+
+      - name: Push Docker image
+        run: docker push $IMAGE_NAME:${{ github.sha }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H 172.18.164.131 >> ~/.ssh/known_hosts
+          ssh labdev@172.18.164.131 << 'EOF'
+
+      - name: Deploy to K3s
+        run: |
+          ssh labdev@YOUR_WSL_IP << 'EOF'
+          kubectl set image deployment/petclinic petclinic=rjshSynectiks/petclinic:${{ github.sha }}
+          kubectl rollout status deployment/petclinic
+          EOF
