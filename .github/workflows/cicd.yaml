@@ -7,7 +7,7 @@ on:
       - feature/devops-cicd
 
 env:
-  IMAGE_NAME: rjshSynectiks/petclinic
+  IMAGE_NAME: rjshsynectiks/petclinic
 
 jobs:
 
@@ -31,36 +31,24 @@ jobs:
         run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
       - name: Build Docker image
-        run: docker build -t $IMAGE_NAME:${{ github.sha }} .
+        run: docker build -t $IMAGE_NAME:latest .
 
       - name: Push Docker image
-        run: docker push $IMAGE_NAME:${{ github.sha }}
+        run: docker push $IMAGE_NAME:latest
 
-  deploy:
+
+  deploy-to-k3s:
     needs: build-and-push
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Install kubectl
-        run: |
-          curl -LO "https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl"
-          chmod +x kubectl
-          sudo mv kubectl /usr/local/bin/
-
-      - name: Setup SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H 172.18.164.131 >> ~/.ssh/known_hosts
-          ssh labdev@172.18.164.131 << 'EOF'
-
-      - name: Deploy to K3s
-        run: |
-          ssh labdev@YOUR_WSL_IP << 'EOF'
-          kubectl set image deployment/petclinic petclinic=rjshSynectiks/petclinic:${{ github.sha }}
-          kubectl rollout status deployment/petclinic
-          EOF
+      - name: Connect to WSL K3s via SSH and Deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.WSL_HOST }}
+          username: labdev
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            kubectl set image deployment/petclinic petclinic=${{ env.IMAGE_NAME }}:latest || true
+            kubectl rollout restart deployment petclinic
+            kubectl rollout status deployment petclinic
